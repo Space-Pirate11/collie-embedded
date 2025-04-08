@@ -1,0 +1,29 @@
+# STM32CubeIDE build artifacts
+*.launch
+*.log
+*.bin
+*.hex
+*.elf
+*.map
+*.list
+
+# Output directories (don't track build output)
+Debug/
+Release/
+build/
+out/
+Object/
+
+# Backup and temp files
+*~
+*.bak
+*.swp
+*.swo
+
+# macOS system files
+.DS_Store
+
+# Python artifacts (if using)
+__pycache__/
+*.pyc
+venv/
