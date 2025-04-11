@@ -27,6 +27,7 @@ Core/Src/stm32u3xx_it.o: ../Core/Src/stm32u3xx_it.c ../Core/Inc/main.h \
  ../Drivers/STM32U3xx_HAL_Driver/Inc/stm32u3xx_hal_flash_ex.h \
  ../Drivers/STM32U3xx_HAL_Driver/Inc/stm32u3xx_hal_i2c.h \
  ../Drivers/STM32U3xx_HAL_Driver/Inc/stm32u3xx_hal_i2c_ex.h \
+ ../Drivers/STM32U3xx_HAL_Driver/Inc/stm32u3xx_hal_icache.h \
  ../Drivers/STM32U3xx_HAL_Driver/Inc/stm32u3xx_hal_pcd.h \
  ../Drivers/STM32U3xx_HAL_Driver/Inc/stm32u3xx_ll_usb.h \
  ../Drivers/STM32U3xx_HAL_Driver/Inc/stm32u3xx_hal_pcd_ex.h \
@@ -66,6 +67,7 @@ Core/Src/stm32u3xx_it.o: ../Core/Src/stm32u3xx_it.c ../Core/Inc/main.h \
 ../Drivers/STM32U3xx_HAL_Driver/Inc/stm32u3xx_hal_flash_ex.h:
 ../Drivers/STM32U3xx_HAL_Driver/Inc/stm32u3xx_hal_i2c.h:
 ../Drivers/STM32U3xx_HAL_Driver/Inc/stm32u3xx_hal_i2c_ex.h:
+../Drivers/STM32U3xx_HAL_Driver/Inc/stm32u3xx_hal_icache.h:
 ../Drivers/STM32U3xx_HAL_Driver/Inc/stm32u3xx_hal_pcd.h:
 ../Drivers/STM32U3xx_HAL_Driver/Inc/stm32u3xx_ll_usb.h:
 ../Drivers/STM32U3xx_HAL_Driver/Inc/stm32u3xx_hal_pcd_ex.h:

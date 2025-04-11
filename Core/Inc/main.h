@@ -32,6 +32,9 @@ extern "C" {
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
+/* Global flag: When set to 1, live streaming (USB/BLE) is enabled */
+extern volatile uint8_t liveStreamingEnabled;
+
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
@@ -59,7 +62,7 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 
 /* USER CODE BEGIN Private defines */
-extern volatile uint8_t liveStreamingEnabled;
+
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

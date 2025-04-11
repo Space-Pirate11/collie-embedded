@@ -2,22 +2,27 @@
 /**
   ******************************************************************************
   * @file           : main.c
-  * @brief          : Main program body
+  * @brief          : Main program body for V0 Dog Collar Board
   ******************************************************************************
   * @attention
   *
-  * Copyright (c) 2025 STMicroelectronics.
-  * All rights reserved.
+  * This firmware integrates:
+  *   - Bosch BMI270 for IMU (accelerometer/gyroscope)
+  *   - SAM-M10Q GPS via UART with NMEA parsing
+  *   - MT29F2G01ABAGD NAND flash (for circular logging)
+  *   - TMP235A4 temperature sensor via ADC
+  *   - BQ25629 battery management (setting charge/current limits, reading battery parameters, SOC calculation)
+  *   - INP1014 WiFi/BLE module via SPI (for live data streaming over BLE)
+  *   - USB CDC for live data streaming over USB
   *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
+  * It logs sensor data with timestamps, wraps logs in NAND flash when full, and streams data live.
   *
   ******************************************************************************
   */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "app_usbx_device.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -40,17 +45,27 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-ADC_HandleTypeDef hadc1;
+ADC_HandleTypeDef adc1;
 
-I2C_HandleTypeDef hi2c1;
+I2C_HandleTypeDef i2c1;
 
-SPI_HandleTypeDef hspi1;
+SPI_HandleTypeDef spi1;
 
-UART_HandleTypeDef huart4;
+UART_HandleTypeDef uart4;
 
-PCD_HandleTypeDef hpcd_USB_DRD_FS;
+PCD_HandleTypeDef pcd_USB_DRD_FS;
 
 /* USER CODE BEGIN PV */
+
+/* Global variables */
+volatile uint8_t liveStreamingEnabled = 1;  // Enable live streaming by default
+uint32_t system_start_tick;
+
+/* NAND log circular buffer configuration */
+#define LOG_PAGE_SIZE 2048
+static uint8_t logPageBuffer[LOG_PAGE_SIZE];
+static uint16_t logBufIndex = 0;
+static uint32_t currentLogPage = 0;  // Logical page counter (high-level addressing)
 
 /* USER CODE END PV */
 
@@ -70,7 +85,19 @@ static void MX_FLASH_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+/* Stub for temperature reading from ADC */
+float Read_Temperature_C(void) {
+    HAL_ADC_Start(&hadc1);
+    if(HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK) {
+        uint32_t adc_val = HAL_ADC_GetValue(&hadc1);
+        HAL_ADC_Stop(&hadc1);
+        // Convert ADC code to temperature in Celsius.
+        // For TMP235A4, refer to its datasheet for conversion formula.
+        float temperature = ((float)adc_val / 4095.0f) * 3.3f * 100.0f; // Example conversion
+        return temperature;
+    }
+    return 0.0f;
+}
 /* USER CODE END 0 */
 
 /**
@@ -109,7 +136,38 @@ int main(void)
   MX_USB_PCD_Init();
   MX_ICACHE_Init();
   MX_FLASH_Init();
+  MX_USBX_Device_Init();
   /* USER CODE BEGIN 2 */
+
+  /* Initialize USBX CDC device stack */
+  MX_USBX_Device_Init();
+
+
+  /* Initialize Device Drivers */
+  system_start_tick = HAL_GetTick();
+  if(BMI270_Init() != 0) {
+        Error_Handler();
+    }
+  if(BQ25629_Init(&hi2c1) != HAL_OK) {
+        Error_Handler();
+    }
+  if(NAND_Init_HighLevel(&hspi1) != Ret_Success) {
+        Error_Handler();
+    }
+  if(WiFiBLE_Init(&hspi1) != HAL_OK) {
+        Error_Handler();
+    }
+  Protocol_Init();
+  GPS_Init();
+
+  /* Main loop timing variables */
+  uint32_t lastIMUTick = HAL_GetTick();
+  uint32_t lastEnvTick = HAL_GetTick();
+  BMI270_Data imuData = {0};
+  float temperature = 0.0f;
+  float battery_voltage = 0.0f;
+  GPS_Fix_t gpsFix = {0};
+
 
   /* USER CODE END 2 */
 
@@ -117,6 +175,51 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  uint32_t now = HAL_GetTick();
+
+	  /* Poll BMI270 IMU at 100 Hz (every 10 ms) */
+	  if(now - lastIMUTick >= 10) {
+		  lastIMUTick = now;
+		  if(BMI270_ReadSensors(&huart4, &imuData.ax, &imuData.ay, &imuData.az, &imuData.gx, &imuData.gy, &imuData.gz) == HAL_OK)
+		  {
+			  imuData.timestamp = now;
+			  Protocol_SendIMU(&imuData);
+		  }
+	  }
+
+	  /* Poll environmental sensors (temperature, battery, GPS) at 1 Hz */
+	  if(now - lastEnvTick >= 1000) {
+		  lastEnvTick = now;
+		  temperature = Read_Temperature_C();
+		  battery_voltage = BQ25629_ReadBatteryVoltage(&hi2c1);
+		  GPS_GetLatestFix(&gpsFix);
+		  Protocol_SendEnvironmental(temperature, battery_voltage, &gpsFix, now);
+	  }
+
+
+	  // Format combined log line using Protocol_LogData
+	  char logLine[256];
+	  Protocol_LogData(&imuData, temperature, battery_voltage, &gpsFix, now, logLine, sizeof(logLine));
+	  uint16_t lineLen = (uint16_t)strlen(logLine);
+
+	  /* Append log line to NAND circular buffer; if full, write to NAND flash and wrap around */
+	  if(logBufIndex + lineLen > LOG_PAGE_SIZE) {
+		  if(NAND_Write(currentLogPage, logPageBuffer, LOG_PAGE_SIZE, &hspi1) != Ret_Success)
+			  Error_Handler();
+		  memset(logPageBuffer, 0xFF, LOG_PAGE_SIZE); // NAND erased state is 0xFF
+		  logBufIndex = 0;
+		  currentLogPage++;
+		  // Wrap around when reaching maximum pages (for simplicity, assume continuous loop)
+		  if(currentLogPage >= (NUM_BLOCKS * NUM_PAGES_PER_BLOCK))
+			  currentLogPage = 0;
+	  }
+	  memcpy(&logPageBuffer[logBufIndex], logLine, lineLen);
+	  logBufIndex += lineLen;
+
+	  Protocol_ProcessIncoming();
+
+	  HAL_Delay(1);
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */

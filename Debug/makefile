@@ -9,6 +9,10 @@ RM := rm -rf
 
 # All of the sources participating in the build are defined here
 -include sources.mk
+-include USBX/App/subdir.mk
+-include Middlewares/ST/usbx/common/usbx_stm32_device_controllers/subdir.mk
+-include Middlewares/ST/usbx/common/usbx_device_classes/src/subdir.mk
+-include Middlewares/ST/usbx/common/core/src/subdir.mk
 -include Drivers/STM32U3xx_HAL_Driver/Src/subdir.mk
 -include Core/Startup/subdir.mk
 -include Core/Src/subdir.mk
@@ -61,7 +65,7 @@ main-build: Collie_V0.elf secondary-outputs
 
 # Tool invocations
 Collie_V0.elf Collie_V0.map: $(OBJS) $(USER_OBJS) /Users/amoltandon/STM32CubeIDE/workspace_1.18.0/Collie_V0/STM32U385CGTXQ_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "Collie_V0.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m33 -T"/Users/amoltandon/STM32CubeIDE/workspace_1.18.0/Collie_V0/STM32U385CGTXQ_FLASH.ld" --specs=nosys.specs -Wl,-Map="Collie_V0.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv5-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+	arm-none-eabi-gcc -o "Collie_V0.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m33 -T"/Users/amoltandon/STM32CubeIDE/workspace_1.18.0/Collie_V0/STM32U385CGTXQ_FLASH.ld" --specs=nosys.specs -Wl,-Map="Collie_V0.map" -Wl,--gc-sections -static -u _printf_float --specs=nano.specs -mfpu=fpv5-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 

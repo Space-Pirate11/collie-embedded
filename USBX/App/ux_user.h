@@ -426,7 +426,7 @@
 
 /* Defined, this macro disables CDC ACM non-blocking transmission support. */
 
-/* #define UX_DEVICE_CLASS_CDC_ACM_TRANSMISSION_DISABLE */
+#define UX_DEVICE_CLASS_CDC_ACM_TRANSMISSION_DISABLE
 
 /* Defined, this macro enables device audio feedback endpoint support.  */
 
@@ -447,7 +447,7 @@
 
 /* Defined, this macro enables device bi-directional endpoint support. */
 
-/* #define UX_DEVICE_BIDIRECTIONAL_ENDPOINT_SUPPORT */
+#define UX_DEVICE_BIDIRECTIONAL_ENDPOINT_SUPPORT
 
 /* Defined, this macro disables interface alternate setting support.
    Device stalls
@@ -511,7 +511,7 @@
 /* #define UX_HOST_SIDE_ONLY */
 
 /* Defined, this value will only enable the device side of usbx.  */
-/* #define UX_DEVICE_SIDE_ONLY */
+#define UX_DEVICE_SIDE_ONLY
 /* Defined, this value will include the OTG polling thread. OTG can only be active if both host/device are present.
 */
 #ifndef UX_HOST_SIDE_ONLY
