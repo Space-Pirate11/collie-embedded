@@ -66,11 +66,22 @@ void HAL_MspInit(void)
   /* USER CODE BEGIN MspInit 0 */
 
   /* USER CODE END MspInit 0 */
+  PWR_PVDTypeDef sConfigPVD = {0};
 
   __HAL_RCC_PWR_CLK_ENABLE();
   HAL_PWREx_EnableVddA();
 
   /* System interrupt init*/
+
+  /** PVD Configuration
+  */
+  sConfigPVD.PVDLevel = PWR_PVDLEVEL_0;
+  sConfigPVD.Mode = PWR_PVD_MODE_NORMAL;
+  HAL_PWR_ConfigPVD(&sConfigPVD);
+
+  /** Enable the PVD Output
+  */
+  HAL_PWR_EnablePVD();
 
   /* USER CODE BEGIN MspInit 1 */
 
@@ -342,7 +353,7 @@ void HAL_UART_MspInit(UART_HandleTypeDef* huart)
     PA1     ------> UART4_RX
     */
     GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1;
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     GPIO_InitStruct.Alternate = GPIO_AF8_UART4;
@@ -404,7 +415,7 @@ void HAL_PCD_MspInit(PCD_HandleTypeDef* hpcd)
   */
     PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_ICLK|RCC_PERIPHCLK_USB1;
     PeriphClkInit.IclkClockSelection = RCC_ICLKCLKSOURCE_SYSCLK;
-    PeriphClkInit.Usb1ClockSelection = RCC_USB1CLKSOURCE_ICLK;
+    PeriphClkInit.Usb1ClockSelection = RCC_USB1CLKSOURCE_ICLK_DIV2;
     if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
     {
       Error_Handler();

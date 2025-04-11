@@ -62,6 +62,8 @@ static void MX_I2C1_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_UART4_Init(void);
 static void MX_USB_PCD_Init(void);
+static void MX_ICACHE_Init(void);
+static void MX_FLASH_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -105,6 +107,8 @@ int main(void)
   MX_SPI1_Init();
   MX_UART4_Init();
   MX_USB_PCD_Init();
+  MX_ICACHE_Init();
+  MX_FLASH_Init();
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */
@@ -129,19 +133,34 @@ void SystemClock_Config(void)
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
-  /** Configure the main internal regulator output voltage
+  /** Enable Epod Booster
   */
-  if (HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE2) != HAL_OK)
+  if (HAL_RCCEx_EpodBoosterClkConfig(RCC_EPODBOOSTER_SOURCE_MSIS, RCC_EPODBOOSTER_DIV1) != HAL_OK)
   {
     Error_Handler();
   }
+  if (HAL_PWREx_EnableEpodBooster() != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure the main internal regulator output voltage
+  */
+  if (HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Set Flash latency before increasing MSIS
+  */
+  __HAL_FLASH_SET_LATENCY(FLASH_LATENCY_2);
 
   /** Initializes the CPU, AHB and APB buses clocks
   */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_MSIS;
   RCC_OscInitStruct.MSISState = RCC_MSI_ON;
   RCC_OscInitStruct.MSISSource = RCC_MSI_RC0;
-  RCC_OscInitStruct.MSISDiv = RCC_MSI_DIV8;
+  RCC_OscInitStruct.MSISDiv = RCC_MSI_DIV1;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -158,7 +177,7 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
   RCC_ClkInitStruct.APB3CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
     Error_Handler();
   }
@@ -222,6 +241,27 @@ static void MX_ADC1_Init(void)
 }
 
 /**
+  * @brief FLASH Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_FLASH_Init(void)
+{
+
+  /* USER CODE BEGIN FLASH_Init 0 */
+
+  /* USER CODE END FLASH_Init 0 */
+
+  /* USER CODE BEGIN FLASH_Init 1 */
+
+  /* USER CODE END FLASH_Init 1 */
+  /* USER CODE BEGIN FLASH_Init 2 */
+
+  /* USER CODE END FLASH_Init 2 */
+
+}
+
+/**
   * @brief I2C1 Initialization Function
   * @param None
   * @retval None
@@ -237,7 +277,7 @@ static void MX_I2C1_Init(void)
 
   /* USER CODE END I2C1_Init 1 */
   hi2c1.Instance = I2C1;
-  hi2c1.Init.Timing = 0x40000A0B;
+  hi2c1.Init.Timing = 0x009032AE;
   hi2c1.Init.OwnAddress1 = 0;
   hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
   hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
@@ -270,6 +310,38 @@ static void MX_I2C1_Init(void)
 }
 
 /**
+  * @brief ICACHE Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_ICACHE_Init(void)
+{
+
+  /* USER CODE BEGIN ICACHE_Init 0 */
+
+  /* USER CODE END ICACHE_Init 0 */
+
+  /* USER CODE BEGIN ICACHE_Init 1 */
+
+  /* USER CODE END ICACHE_Init 1 */
+
+  /** Enable instruction cache in 1-way (direct mapped cache)
+  */
+  if (HAL_ICACHE_ConfigAssociativityMode(ICACHE_1WAY) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_ICACHE_Enable() != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN ICACHE_Init 2 */
+
+  /* USER CODE END ICACHE_Init 2 */
+
+}
+
+/**
   * @brief SPI1 Initialization Function
   * @param None
   * @retval None
@@ -290,11 +362,11 @@ static void MX_SPI1_Init(void)
   hspi1.Instance = SPI1;
   hspi1.Init.Mode = SPI_MODE_MASTER;
   hspi1.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi1.Init.DataSize = SPI_DATASIZE_4BIT;
+  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -342,7 +414,7 @@ static void MX_UART4_Init(void)
 
   /* USER CODE END UART4_Init 1 */
   huart4.Instance = UART4;
-  huart4.Init.BaudRate = 115200;
+  huart4.Init.BaudRate = 9600;
   huart4.Init.WordLength = UART_WORDLENGTH_8B;
   huart4.Init.StopBits = UART_STOPBITS_1;
   huart4.Init.Parity = UART_PARITY_NONE;
@@ -351,8 +423,10 @@ static void MX_UART4_Init(void)
   huart4.Init.OverSampling = UART_OVERSAMPLING_16;
   huart4.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
   huart4.Init.ClockPrescaler = UART_PRESCALER_DIV1;
-  huart4.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-  if (HAL_MultiProcessor_Init(&huart4, 0, UART_WAKEUPMETHOD_IDLELINE) != HAL_OK)
+  huart4.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_RXINVERT_INIT|UART_ADVFEATURE_SWAP_INIT;
+  huart4.AdvancedInit.RxPinLevelInvert = UART_ADVFEATURE_RXINV_ENABLE;
+  huart4.AdvancedInit.Swap = UART_ADVFEATURE_SWAP_ENABLE;
+  if (HAL_UART_Init(&huart4) != HAL_OK)
   {
     Error_Handler();
   }
