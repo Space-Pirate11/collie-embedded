@@ -2,20 +2,16 @@
 /**
   ******************************************************************************
   * @file           : main.c
-  * @brief          : Main program body for V0 Dog Collar Board
+  * @brief          : Main program body
   ******************************************************************************
   * @attention
   *
-  * This firmware integrates:
-  *   - Bosch BMI270 for IMU (accelerometer/gyroscope)
-  *   - SAM-M10Q GPS via UART with NMEA parsing
-  *   - MT29F2G01ABAGD NAND flash (for circular logging)
-  *   - TMP235A4 temperature sensor via ADC
-  *   - BQ25629 battery management (setting charge/current limits, reading battery parameters, SOC calculation)
-  *   - INP1014 WiFi/BLE module via SPI (for live data streaming over BLE)
-  *   - USB CDC for live data streaming over USB
+  * Copyright (c) 2025 STMicroelectronics.
+  * All rights reserved.
   *
-  * It logs sensor data with timestamps, wraps logs in NAND flash when full, and streams data live.
+  * This software is licensed under terms that can be found in the LICENSE file
+  * in the root directory of this software component.
+  * If no LICENSE file comes with this software, it is provided AS-IS.
   *
   ******************************************************************************
   */
@@ -26,7 +22,17 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdio.h>
+#include <string.h>
+#include "protocol.h" // Includes custom_types, gps, bq25629
+#include "nand_m79a.h"  // Includes nand_m79a_lld for Ret_Success etc.
+#include "wifi_ble.h"
+/* Do not include usbx_device.h if using app_usbx_device.c for init */
 
+/* Include BMI2 driver files */
+#include "bmi2.h"
+#include "bmi270.h"
+#include "bmi2_defs.h" // Include for BMI2 defines like BMI2_CONT_MODE
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -36,7 +42,9 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+// Use PAGE_DATA_SIZE from LLD header
+#define LOG_PAGE_SIZE PAGE_DATA_SIZE // Should be 2048 based on nand_m79a_lld.h
+#define BMI270_I2C_ADDR BMI2_I2C_PRIM_ADDR // Or BMI2_I2C_SEC_ADDR depending on hardware
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -45,28 +53,33 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-ADC_HandleTypeDef adc1;
+ADC_HandleTypeDef hadc1;
 
-I2C_HandleTypeDef i2c1;
+I2C_HandleTypeDef hi2c1;
 
-SPI_HandleTypeDef spi1;
+SPI_HandleTypeDef hspi1;
 
-UART_HandleTypeDef uart4;
+UART_HandleTypeDef huart4;
 
-PCD_HandleTypeDef pcd_USB_DRD_FS;
+PCD_HandleTypeDef hpcd_USB_DRD_FS;
 
 /* USER CODE BEGIN PV */
-
 /* Global variables */
 volatile uint8_t liveStreamingEnabled = 1;  // Enable live streaming by default
 uint32_t system_start_tick;
 
+/* BMI270 Device Structure */
+static struct bmi2_dev bmi270_dev;
+
 /* NAND log circular buffer configuration */
-#define LOG_PAGE_SIZE 2048
 static uint8_t logPageBuffer[LOG_PAGE_SIZE];
 static uint16_t logBufIndex = 0;
-static uint32_t currentLogPage = 0;  // Logical page counter (high-level addressing)
+// Using NUM_BLOCKS and NUM_PAGES_PER_BLOCK from nand_m79a_lld.h
+static uint32_t currentLogBlock = 0; // Track current block index
+static uint32_t currentLogPageInBlock = 0; // Track current page within block
 
+/* No need to extern pool buffer if MX_USBX_Device_Init takes no arguments */
+/* extern UCHAR ux_device_byte_pool_buffer[]; */
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -80,23 +93,113 @@ static void MX_USB_PCD_Init(void);
 static void MX_ICACHE_Init(void);
 static void MX_FLASH_Init(void);
 /* USER CODE BEGIN PFP */
+float Read_Temperature_C(void); // Add prototype for local function
+/* Helper function Get_Current_Logical_Page_Index removed as it wasn't used */
+static void Advance_NAND_Page(void); // Helper to advance NAND page/block index
 
+/* BMI270 HAL Wrapper Function Prototypes */
+static int8_t bmi2_i2c_read(uint8_t reg_addr, uint8_t *data, uint32_t len, void *intf_ptr);
+static int8_t bmi2_i2c_write(uint8_t reg_addr, const uint8_t *data, uint32_t len, void *intf_ptr);
+static void bmi2_delay_us(uint32_t period, void *intf_ptr);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-/* Stub for temperature reading from ADC */
+
+/* Function for temperature reading from ADC */
 float Read_Temperature_C(void) {
-    HAL_ADC_Start(&hadc1);
-    if(HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK) {
+    HAL_StatusTypeDef adc_status;
+
+    // Start ADC conversion
+    adc_status = HAL_ADC_Start(&hadc1);
+    if (adc_status != HAL_OK) {
+        return -999.0f;
+    }
+
+    // Poll for conversion completion
+    adc_status = HAL_ADC_PollForConversion(&hadc1, 10);
+    if (adc_status == HAL_OK) {
         uint32_t adc_val = HAL_ADC_GetValue(&hadc1);
         HAL_ADC_Stop(&hadc1);
-        // Convert ADC code to temperature in Celsius.
-        // For TMP235A4, refer to its datasheet for conversion formula.
-        float temperature = ((float)adc_val / 4095.0f) * 3.3f * 100.0f; // Example conversion
+
+        // Convert ADC for TMP235A4
+        // Assume VREF+ is connected to Vdda (typically 3.3V)
+        // Vref value might need adjustment based on actual Vdda
+        float vref = 3.3f;
+        float v_out_mv = ((float)adc_val / 4095.0f) * vref * 1000.0f;
+        // TMP235 Transfer function: Vout = (10 mV/°C * T) + 500 mV
+        // T = (Vout - 500 mV) / (10 mV/°C)
+        float temperature = (v_out_mv - 500.0f) / 10.0f;
         return temperature;
+    } else {
+        HAL_ADC_Stop(&hadc1);
+        return -999.0f;
     }
-    return 0.0f;
+}
+
+// Helper to advance NAND page/block index, handling wrap-around and erase
+static void Advance_NAND_Page(void) {
+    currentLogPageInBlock++;
+    if (currentLogPageInBlock >= NUM_PAGES_PER_BLOCK) {
+        currentLogPageInBlock = 0;
+        currentLogBlock++;
+        if (currentLogBlock >= NUM_BLOCKS) {
+            currentLogBlock = 0; // Wrap around blocks
+        }
+        // Erase the *next* block before writing to its first page
+        // Add Bad Block Management here! Skip bad blocks.
+        PhysicalAddrs eraseAddr = { .block = currentLogBlock }; // Block erase only needs block number
+        NAND_ReturnType erase_status = NAND_Block_Erase(&hspi1, &eraseAddr);
+        if (erase_status != Ret_Success) {
+            // Consider handling erase error (e.g., marking block as bad and trying next)
+            Error_Handler();
+        }
+    }
+}
+
+/* HAL I2C Read Wrapper for BMI270 */
+static int8_t bmi2_i2c_read(uint8_t reg_addr, uint8_t *data, uint32_t len, void *intf_ptr) {
+    I2C_HandleTypeDef *hi2c = (I2C_HandleTypeDef*)intf_ptr;
+    HAL_StatusTypeDef status;
+
+    // BMI270 uses 7-bit address, left-shifted by 1 for HAL functions
+    uint16_t dev_addr = BMI270_I2C_ADDR << 1;
+
+    status = HAL_I2C_Mem_Read(hi2c, dev_addr, (uint16_t)reg_addr, I2C_MEMADD_SIZE_8BIT, data, len, HAL_MAX_DELAY);
+
+    return (status == HAL_OK) ? BMI2_OK : BMI2_E_COM_FAIL;
+}
+
+/* HAL I2C Write Wrapper for BMI270 */
+static int8_t bmi2_i2c_write(uint8_t reg_addr, const uint8_t *data, uint32_t len, void *intf_ptr) {
+    I2C_HandleTypeDef *hi2c = (I2C_HandleTypeDef*)intf_ptr;
+    HAL_StatusTypeDef status;
+
+    // BMI270 uses 7-bit address, left-shifted by 1 for HAL functions
+    uint16_t dev_addr = BMI270_I2C_ADDR << 1;
+
+    status = HAL_I2C_Mem_Write(hi2c, dev_addr, (uint16_t)reg_addr, I2C_MEMADD_SIZE_8BIT, (uint8_t*)data, len, HAL_MAX_DELAY);
+
+    return (status == HAL_OK) ? BMI2_OK : BMI2_E_COM_FAIL;
+}
+
+/* HAL Delay Wrapper for BMI270 */
+static void bmi2_delay_us(uint32_t period, void *intf_ptr) {
+    /* Implement microsecond delay using appropriate timer or HAL_Delay */
+    /* HAL_Delay provides millisecond delay, need a more precise method for us */
+    /* Example using HAL_Delay for approx: */
+    if (period < 1000) {
+        // For small delays, a busy wait or NOP loop might be needed if no us timer
+        // Warning: This is not accurate for very short delays and depends on clock speed
+        volatile uint32_t wait_loop_index = (period * (SystemCoreClock / 1000000U)) / 4; // Rough estimate
+         while(wait_loop_index != 0U)
+         {
+           wait_loop_index--;
+         }
+    } else {
+        HAL_Delay(period / 1000);
+    }
+    UX_PARAMETER_NOT_USED(intf_ptr); // Parameter not used in this simple implementation
 }
 /* USER CODE END 0 */
 
@@ -108,7 +211,9 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+  int8_t bmi2_rslt;
+  uint8_t sensor_list[] = { BMI2_ACCEL, BMI2_GYRO }; // Enable Accel and Gyro
+  struct bmi2_sens_config sens_cfg;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -139,35 +244,93 @@ int main(void)
   MX_USBX_Device_Init();
   /* USER CODE BEGIN 2 */
 
-  /* Initialize USBX CDC device stack */
-  MX_USBX_Device_Init();
-
 
   /* Initialize Device Drivers */
   system_start_tick = HAL_GetTick();
-  if(BMI270_Init() != 0) {
-        Error_Handler();
-    }
+
+  // Initialize BMI270
+  bmi270_dev.chip_id = BMI270_CHIP_ID; // Set expected chip ID
+  bmi270_dev.intf = BMI2_I2C_INTF;     // Set interface type
+  bmi270_dev.read = bmi2_i2c_read;     // Assign HAL read function
+  bmi270_dev.write = bmi2_i2c_write;    // Assign HAL write function
+  bmi270_dev.delay_us = bmi2_delay_us; // Assign HAL delay function
+  bmi270_dev.intf_ptr = &hi2c1;        // Pass I2C handle to wrappers
+  bmi270_dev.read_write_len = 32;      // Max I2C read/write length (adjust if needed)
+  bmi270_dev.config_file_ptr = NULL;   // Use internal config file (bmi270_config_file)
+
+  // Initialize BMI2 sensor library (loads config file)
+  bmi2_rslt = bmi270_init(&bmi270_dev);
+  if (bmi2_rslt != BMI2_OK) {
+      Error_Handler();
+  }
+
+  // Enable Accel and Gyro sensors
+  bmi2_rslt = bmi270_sensor_enable(sensor_list, sizeof(sensor_list)/sizeof(sensor_list[0]), &bmi270_dev);
+   if (bmi2_rslt != BMI2_OK) {
+      Error_Handler();
+  }
+
+   // Configure Accel
+  sens_cfg.type = BMI2_ACCEL;
+  bmi2_rslt = bmi2_get_sensor_config(&sens_cfg, 1, &bmi270_dev); // Read current config first
+  if (bmi2_rslt != BMI2_OK) { Error_Handler(); }
+  sens_cfg.cfg.acc.odr = BMI2_ACC_ODR_100HZ;         // Set ODR to 100Hz
+  sens_cfg.cfg.acc.range = BMI2_ACC_RANGE_2G;       // Set range (e.g., 2G)
+  sens_cfg.cfg.acc.bwp = BMI2_ACC_NORMAL_AVG4;      // Set bandwidth param (Average 4 samples)
+  sens_cfg.cfg.acc.filter_perf = BMI2_PERF_OPT_MODE; // Corrected macro (Optimized performance mode)
+  bmi2_rslt = bmi2_set_sensor_config(&sens_cfg, 1, &bmi270_dev);
+  if (bmi2_rslt != BMI2_OK) { Error_Handler(); }
+
+  // Configure Gyro
+  sens_cfg.type = BMI2_GYRO;
+  bmi2_rslt = bmi2_get_sensor_config(&sens_cfg, 1, &bmi270_dev); // Read current config first
+  if (bmi2_rslt != BMI2_OK) { Error_Handler(); }
+  sens_cfg.cfg.gyr.odr = BMI2_GYR_ODR_100HZ;         // Set ODR to 100Hz
+  sens_cfg.cfg.gyr.range = BMI2_GYR_RANGE_2000;      // Set range (e.g., 2000 dps)
+  sens_cfg.cfg.gyr.bwp = BMI2_GYR_NORMAL_MODE;       // Set bandwidth param (Normal mode)
+  sens_cfg.cfg.gyr.noise_perf = BMI2_POWER_OPT_MODE; // Set noise performance (Power optimized)
+  sens_cfg.cfg.gyr.filter_perf = BMI2_PERF_OPT_MODE; // Corrected macro (Optimized performance mode)
+  bmi2_rslt = bmi2_set_sensor_config(&sens_cfg, 1, &bmi270_dev);
+  if (bmi2_rslt != BMI2_OK) { Error_Handler(); }
+
+  // Initialize BQ25629 BMS
   if(BQ25629_Init(&hi2c1) != HAL_OK) {
         Error_Handler();
-    }
-  if(NAND_Init_HighLevel(&hspi1) != Ret_Success) {
+  }
+
+  // Initialize NAND Flash
+  if(NAND_Init(&hspi1) != Ret_Success) {
         Error_Handler();
-    }
+  }
+  // Erase the first block on startup
+  PhysicalAddrs eraseAddr = { .block = currentLogBlock }; // Block erase only needs block number
+  NAND_ReturnType erase_status = NAND_Block_Erase(&hspi1, &eraseAddr);
+  if (erase_status != Ret_Success) {
+        Error_Handler();
+  }
+
+  // Initialize WiFi/BLE Module
   if(WiFiBLE_Init(&hspi1) != HAL_OK) {
         Error_Handler();
-    }
+  }
+
+  // Initialize Protocol module
   Protocol_Init();
+
+  // Initialize GPS module
   GPS_Init();
+
 
   /* Main loop timing variables */
   uint32_t lastIMUTick = HAL_GetTick();
   uint32_t lastEnvTick = HAL_GetTick();
-  BMI270_Data imuData = {0};
+
+  // Sensor data variables
+  struct bmi2_sens_data sensor_data = { { 0 } }; // Use standard BMI2 struct
+  BMI270_Data imuData = {0}; // Keep custom struct for protocol/logging if needed
   float temperature = 0.0f;
   float battery_voltage = 0.0f;
   GPS_Fix_t gpsFix = {0};
-
 
   /* USER CODE END 2 */
 
@@ -175,50 +338,86 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  uint32_t now = HAL_GetTick();
+    uint32_t now = HAL_GetTick();
 
-	  /* Poll BMI270 IMU at 100 Hz (every 10 ms) */
-	  if(now - lastIMUTick >= 10) {
-		  lastIMUTick = now;
-		  if(BMI270_ReadSensors(&huart4, &imuData.ax, &imuData.ay, &imuData.az, &imuData.gx, &imuData.gy, &imuData.gz) == HAL_OK)
-		  {
-			  imuData.timestamp = now;
-			  Protocol_SendIMU(&imuData);
-		  }
-	  }
+    /* --- Sensor Polling --- */
 
-	  /* Poll environmental sensors (temperature, battery, GPS) at 1 Hz */
-	  if(now - lastEnvTick >= 1000) {
-		  lastEnvTick = now;
-		  temperature = Read_Temperature_C();
-		  battery_voltage = BQ25629_ReadBatteryVoltage(&hi2c1);
-		  GPS_GetLatestFix(&gpsFix);
-		  Protocol_SendEnvironmental(temperature, battery_voltage, &gpsFix, now);
-	  }
+    /* Poll BMI270 IMU at 100 Hz (every 10 ms) */
+    if(now - lastIMUTick >= 10) {
+        lastIMUTick = now;
 
+        // Read Accel and Gyro data using bmi2_get_sensor_data
+        bmi2_rslt = bmi2_get_sensor_data(&sensor_data, &bmi270_dev);
+        if(bmi2_rslt == BMI2_OK)
+        {
+            // Populate custom imuData struct from standard sensor_data
+            imuData.ax = sensor_data.acc.x;
+            imuData.ay = sensor_data.acc.y;
+            imuData.az = sensor_data.acc.z;
+            imuData.gx = sensor_data.gyr.x;
+            imuData.gy = sensor_data.gyr.y;
+            imuData.gz = sensor_data.gyr.z;
+            imuData.timestamp = now - system_start_tick; // Use HAL ticks for timestamp
 
-	  // Format combined log line using Protocol_LogData
-	  char logLine[256];
-	  Protocol_LogData(&imuData, temperature, battery_voltage, &gpsFix, now, logLine, sizeof(logLine));
-	  uint16_t lineLen = (uint16_t)strlen(logLine);
+            if(liveStreamingEnabled) {
+                Protocol_SendIMU(&imuData);
+            }
+        } else {
+            // Handle IMU read error
+        }
+    }
 
-	  /* Append log line to NAND circular buffer; if full, write to NAND flash and wrap around */
-	  if(logBufIndex + lineLen > LOG_PAGE_SIZE) {
-		  if(NAND_Write(currentLogPage, logPageBuffer, LOG_PAGE_SIZE, &hspi1) != Ret_Success)
-			  Error_Handler();
-		  memset(logPageBuffer, 0xFF, LOG_PAGE_SIZE); // NAND erased state is 0xFF
-		  logBufIndex = 0;
-		  currentLogPage++;
-		  // Wrap around when reaching maximum pages (for simplicity, assume continuous loop)
-		  if(currentLogPage >= (NUM_BLOCKS * NUM_PAGES_PER_BLOCK))
-			  currentLogPage = 0;
-	  }
-	  memcpy(&logPageBuffer[logBufIndex], logLine, lineLen);
-	  logBufIndex += lineLen;
+    /* Poll environmental sensors at 1 Hz */
+    if(now - lastEnvTick >= 1000) {
+        lastEnvTick = now;
+        temperature = Read_Temperature_C();
+        battery_voltage = BQ25629_ReadBatteryVoltage(&hi2c1);
+        GPS_GetLatestFix(&gpsFix); // Tries to update gpsFix if new data
 
-	  Protocol_ProcessIncoming();
+        if(liveStreamingEnabled) {
+            Protocol_SendEnvironmental(temperature, battery_voltage, &gpsFix, now - system_start_tick);
+        }
 
-	  HAL_Delay(1);
+        /* --- NAND Logging --- */
+        char logLine[256];
+        // Pass data from imuData (populated above) to logger
+        Protocol_LogData(&imuData, temperature, battery_voltage, &gpsFix, now - system_start_tick, logLine, sizeof(logLine));
+        uint16_t lineLen = (uint16_t)strlen(logLine);
+
+        if (lineLen > 0 && lineLen < sizeof(logLine)) {
+            // Check if current line fits in the remaining buffer space
+            if((logBufIndex + lineLen) > LOG_PAGE_SIZE) {
+                // Buffer full: Write current buffer content to NAND
+                PhysicalAddrs writeAddr = { .block = currentLogBlock, .page = currentLogPageInBlock, .colAddr = 0 };
+                if(NAND_Page_Program(&hspi1, &writeAddr, logPageBuffer, logBufIndex) != Ret_Success) { // Use Page_Program
+                    Error_Handler(); // Handle NAND write error
+                }
+                // Clear buffer (fill with 0xFF for NAND is common practice)
+                memset(logPageBuffer, 0xFF, LOG_PAGE_SIZE);
+                logBufIndex = 0; // Reset buffer index
+                Advance_NAND_Page(); // Move to next page/block (handles erase if needed)
+            }
+            // Append new data to buffer (ensure it fits before memcpy)
+            if ((logBufIndex + lineLen) <= LOG_PAGE_SIZE) {
+                 memcpy(&logPageBuffer[logBufIndex], logLine, lineLen);
+                 logBufIndex += lineLen;
+             } else {
+                  // This case should ideally not happen if the check above works correctly
+                  // Maybe log an error that data couldn't be buffered
+             }
+        }
+    }
+
+    /* --- Command Processing --- */
+    Protocol_ProcessIncoming();
+
+    /* --- USBX Task Processing --- */
+    /* If not using RTOS, call USBX task runner periodically */
+    USBX_Device_Process(); // Make sure this is defined somewhere (e.g., app_usbx_device.c)
+
+    /* --- Yield/Delay --- */
+    // If using RTOS, replace HAL_Delay with task yield/sleep
+    // HAL_Delay(1); // Use minimal delay only if absolutely necessary without RTOS
 
     /* USER CODE END WHILE */
 
@@ -352,14 +551,11 @@ static void MX_FLASH_Init(void)
 {
 
   /* USER CODE BEGIN FLASH_Init 0 */
-
   /* USER CODE END FLASH_Init 0 */
 
   /* USER CODE BEGIN FLASH_Init 1 */
-
   /* USER CODE END FLASH_Init 1 */
   /* USER CODE BEGIN FLASH_Init 2 */
-
   /* USER CODE END FLASH_Init 2 */
 
 }
@@ -373,11 +569,9 @@ static void MX_I2C1_Init(void)
 {
 
   /* USER CODE BEGIN I2C1_Init 0 */
-
   /* USER CODE END I2C1_Init 0 */
 
   /* USER CODE BEGIN I2C1_Init 1 */
-
   /* USER CODE END I2C1_Init 1 */
   hi2c1.Instance = I2C1;
   hi2c1.Init.Timing = 0x009032AE;
@@ -407,7 +601,6 @@ static void MX_I2C1_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN I2C1_Init 2 */
-
   /* USER CODE END I2C1_Init 2 */
 
 }
@@ -421,11 +614,9 @@ static void MX_ICACHE_Init(void)
 {
 
   /* USER CODE BEGIN ICACHE_Init 0 */
-
   /* USER CODE END ICACHE_Init 0 */
 
   /* USER CODE BEGIN ICACHE_Init 1 */
-
   /* USER CODE END ICACHE_Init 1 */
 
   /** Enable instruction cache in 1-way (direct mapped cache)
@@ -439,7 +630,6 @@ static void MX_ICACHE_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN ICACHE_Init 2 */
-
   /* USER CODE END ICACHE_Init 2 */
 
 }
@@ -453,13 +643,11 @@ static void MX_SPI1_Init(void)
 {
 
   /* USER CODE BEGIN SPI1_Init 0 */
-
   /* USER CODE END SPI1_Init 0 */
 
   SPI_AutonomousModeConfTypeDef HAL_SPI_AutonomousMode_Cfg_Struct = {0};
 
   /* USER CODE BEGIN SPI1_Init 1 */
-
   /* USER CODE END SPI1_Init 1 */
   /* SPI1 parameter configuration*/
   hspi1.Instance = SPI1;
@@ -496,7 +684,6 @@ static void MX_SPI1_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN SPI1_Init 2 */
-
   /* USER CODE END SPI1_Init 2 */
 
 }
@@ -510,11 +697,9 @@ static void MX_UART4_Init(void)
 {
 
   /* USER CODE BEGIN UART4_Init 0 */
-
   /* USER CODE END UART4_Init 0 */
 
   /* USER CODE BEGIN UART4_Init 1 */
-
   /* USER CODE END UART4_Init 1 */
   huart4.Instance = UART4;
   huart4.Init.BaudRate = 9600;
@@ -546,7 +731,6 @@ static void MX_UART4_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN UART4_Init 2 */
-
   /* USER CODE END UART4_Init 2 */
 
 }
@@ -560,11 +744,9 @@ static void MX_USB_PCD_Init(void)
 {
 
   /* USER CODE BEGIN USB_Init 0 */
-
   /* USER CODE END USB_Init 0 */
 
   /* USER CODE BEGIN USB_Init 1 */
-
   /* USER CODE END USB_Init 1 */
   hpcd_USB_DRD_FS.Instance = USB_DRD_FS;
   hpcd_USB_DRD_FS.Init.dev_endpoints = 8;
@@ -582,7 +764,6 @@ static void MX_USB_PCD_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN USB_Init 2 */
-
   /* USER CODE END USB_Init 2 */
 
 }
@@ -596,7 +777,6 @@ static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
   /* USER CODE BEGIN MX_GPIO_Init_1 */
-
   /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
@@ -605,53 +785,69 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOH, GPIO_PIN_1, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPS_RST_GPIO_Port, GPS_RST_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3|GPIO_PIN_4|GPIO_PIN_15, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, WIFI_EN_Pin|CS_WIFI_Pin|BMS_RST_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13|GPIO_PIN_14, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, LDO_EN_Pin|CS_NAND_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : PH0 PH3 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_3;
+  /*Configure GPIO pins : WIFI_INT_Pin BMS_INT_Pin */
+  GPIO_InitStruct.Pin = WIFI_INT_Pin|BMS_INT_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PH1 */
-  GPIO_InitStruct.Pin = GPIO_PIN_1;
+  /*Configure GPIO pin : GPS_RST_Pin */
+  GPIO_InitStruct.Pin = GPS_RST_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPS_RST_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PA3 PA4 PA15 */
-  GPIO_InitStruct.Pin = GPIO_PIN_3|GPIO_PIN_4|GPIO_PIN_15;
+  /*Configure GPIO pins : WIFI_EN_Pin CS_WIFI_Pin BMS_RST_Pin */
+  GPIO_InitStruct.Pin = WIFI_EN_Pin|CS_WIFI_Pin|BMS_RST_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PB13 PB14 */
-  GPIO_InitStruct.Pin = GPIO_PIN_13|GPIO_PIN_14;
+  /*Configure GPIO pins : LDO_EN_Pin CS_NAND_Pin */
+  GPIO_InitStruct.Pin = LDO_EN_Pin|CS_NAND_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PB4 PB8 */
-  GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_8;
+  /*Configure GPIO pins : GPS_INT_Pin BMS_CHG_Pin */
+  GPIO_InitStruct.Pin = GPS_INT_Pin|BMS_CHG_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
-
   /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
+
+/**
+  * @brief  UART Receive Complete Callback.
+  * Called by HAL_UART_IRQHandler -> HAL_UART_RxCpltCallback when defined.
+  * Redirects the call to the GPS driver's callback.
+  * @param  huart: UART handle.
+  * @retval None
+  */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+  /* Check if the interrupt is from the GPS UART */
+  if (huart->Instance == UART4)
+  {
+    /* Call the GPS driver's callback function */
+    GPS_UART_RxCpltCallback(huart); // Defined in gps.c
+  }
+}
 
 /* USER CODE END 4 */
 
@@ -666,6 +862,7 @@ void Error_Handler(void)
   __disable_irq();
   while (1)
   {
+      // Blink an LED or use debugger
   }
   /* USER CODE END Error_Handler_Debug */
 }
@@ -683,6 +880,8 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE BEGIN 6 */
   /* User can add his own implementation to report the file name and line number,
      ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+   printf("Assertion failed: file %s on line %ld\r\n", (char *)file, line); // Cast file pointer
+   Error_Handler(); // Halt on assert failure
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */

@@ -43,7 +43,8 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN PV */
-
+/* External global pointer for the CDC ACM instance declared in app_usbx_device.c */
+extern UX_SLAVE_CLASS_CDC_ACM *cdc_acm_instance;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -65,7 +66,8 @@
 VOID USBD_CDC_ACM_Activate(VOID *cdc_acm_instance)
 {
   /* USER CODE BEGIN USBD_CDC_ACM_Activate */
-  UX_PARAMETER_NOT_USED(cdc_acm_instance);
+  /* Save the CDC instance using the argument */
+  cdc_acm_instance = (UX_SLAVE_CLASS_CDC_ACM *)cdc_acm_instance; // Use renamed argument
   /* USER CODE END USBD_CDC_ACM_Activate */
 
   return;
@@ -80,7 +82,12 @@ VOID USBD_CDC_ACM_Activate(VOID *cdc_acm_instance)
 VOID USBD_CDC_ACM_Deactivate(VOID *cdc_acm_instance)
 {
   /* USER CODE BEGIN USBD_CDC_ACM_Deactivate */
-  UX_PARAMETER_NOT_USED(cdc_acm_instance);
+  /* Reset the CDC instance */
+  cdc_acm_instance = UX_NULL;
+
+  /* Optionally use the argument if needed for cleanup, but ensure it's not used */
+  /* after setting the global pointer to NULL */
+  UX_PARAMETER_NOT_USED(cdc_acm_instance); // Use renamed argument
   /* USER CODE END USBD_CDC_ACM_Deactivate */
 
   return;
@@ -95,7 +102,7 @@ VOID USBD_CDC_ACM_Deactivate(VOID *cdc_acm_instance)
 VOID USBD_CDC_ACM_ParameterChange(VOID *cdc_acm_instance)
 {
   /* USER CODE BEGIN USBD_CDC_ACM_ParameterChange */
-  UX_PARAMETER_NOT_USED(cdc_acm_instance);
+  UX_PARAMETER_NOT_USED(cdc_acm_instance); // Use renamed argument
   /* USER CODE END USBD_CDC_ACM_ParameterChange */
 
   return;

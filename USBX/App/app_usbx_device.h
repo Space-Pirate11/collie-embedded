@@ -57,7 +57,7 @@ extern "C" {
 UINT MX_USBX_Device_Init(VOID);
 
 /* USER CODE BEGIN EFP */
-
+VOID USBX_Device_Process(void); // Add prototype for process function if called from main
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/

@@ -23,7 +23,14 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "ux_api.h"
+#include "ux_system.h"
+#include "ux_utility.h"
+#include "ux_device_stack.h"
+#include "ux_device_class_cdc_acm.h"
+#include "ux_device_descriptors.h" // Include descriptor functions
+#include "ux_dcd_stm32.h"          // Include DCD header
+#include "main.h"                  // Include main for HAL handles
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -33,7 +40,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+/* Redefinition removed - aligns with app_usbx_device.h now */
+/* #define USBX_DEVICE_MEMORY_STACK_SIZE UX_DEVICE_APP_MEM_POOL_SIZE */
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -44,7 +52,7 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN UX_Device_Memory_Buffer */
-
+/* Pool buffer size defined by UX_DEVICE_APP_MEM_POOL_SIZE in app_usbx_device.h */
 /* USER CODE END UX_Device_Memory_Buffer */
 #if defined ( __ICCARM__ )
 #pragma data_alignment=4
@@ -56,7 +64,10 @@ static ULONG cdc_acm_configuration_number;
 static UX_SLAVE_CLASS_CDC_ACM_PARAMETER cdc_acm_parameter;
 
 /* USER CODE BEGIN PV */
-
+/* Define the global pointer for the CDC ACM instance */
+UX_SLAVE_CLASS_CDC_ACM *cdc_acm_instance = UX_NULL;
+/* Declare hpcd_USB_DRD_FS which is defined in main.c */
+extern PCD_HandleTypeDef hpcd_USB_DRD_FS;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -86,8 +97,8 @@ UINT MX_USBX_Device_Init(VOID)
   UCHAR *pointer;
 
   /* USER CODE BEGIN MX_USBX_Device_Init0 */
-  UX_PARAMETER_NOT_USED(ux_device_byte_pool_buffer);
-
+  /* Assign memory pointer to local pool buffer */
+  pointer = (UCHAR *)ux_device_byte_pool_buffer; // Use local buffer
   /* USER CODE END MX_USBX_Device_Init0 */
   pointer = ux_device_byte_pool_buffer;
 
@@ -157,7 +168,15 @@ UINT MX_USBX_Device_Init(VOID)
   }
 
   /* USER CODE BEGIN MX_USBX_Device_Init1 */
-
+    /* Initialize the STM32 USB device controller driver */
+    /* Pass the correct DCD instance based on FS/HS and USB peripheral used */
+    ret = ux_dcd_stm32_initialize((ULONG)USB_DRD_FS, (ULONG)&hpcd_USB_DRD_FS);
+    if (ret != UX_SUCCESS)
+    {
+        return ret;
+    }
+    /* Start the USB device */
+    HAL_PCD_Start(&hpcd_USB_DRD_FS);
   /* USER CODE END MX_USBX_Device_Init1 */
 
   return ret;
@@ -205,7 +224,7 @@ ULONG _ux_utility_time_get(VOID)
   ULONG time_tick = 0U;
 
   /* USER CODE BEGIN _ux_utility_time_get */
-
+  time_tick = HAL_GetTick();
   /* USER CODE END _ux_utility_time_get */
 
   return time_tick;
@@ -300,5 +319,13 @@ static UINT USBD_ChangeFunction(ULONG Device_State)
   return status;
 }
 /* USER CODE BEGIN 1 */
-
+/**
+  * @brief  USBX Device Process callback function.
+  * @param  none
+  * @retval none
+  */
+VOID USBX_Device_Process(VOID)
+{
+    ux_device_stack_tasks_run();
+}
 /* USER CODE END 1 */

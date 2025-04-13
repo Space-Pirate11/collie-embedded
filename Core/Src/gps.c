@@ -1,7 +1,7 @@
 /**
   * @file    gps.c
   * @brief   Implementation of the GPS driver for the SAM-M10Q module.
-  *          Based on the SAM-M10Q Integration Manual (UBX-22020019).
+  * Based on the SAM-M10Q Integration Manual (UBX-22020019).
   *
   * This implementation configures UART reception for NMEA sentences, and parses (for example)
   * GGA or RMC sentences to extract latitude, longitude, fix quality, and satellite count.
@@ -9,114 +9,186 @@
   */
 
 #include "gps.h"
+#include "main.h" // Include main header for HAL handles like huart4
+#include "custom_types.h" // Include for GPS_Fix_t definition
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 
 /* Buffer for receiving NMEA sentences */
 #define GPS_RX_BUFFER_SIZE 128
-static char gps_rx_buffer[GPS_RX_BUFFER_SIZE] = {0};
+static char gps_rx_buffer[GPS_RX_BUFFER_SIZE]; // Complete sentence buffer
 static uint8_t gps_rx_index = 0;
+static char gps_rx_char; // Single character buffer for UART IT
 
-/* Latest GPS fix */
+/* Latest GPS fix - declared static */
 static GPS_Fix_t currentGPSFix = {0};
+static uint8_t new_fix_available = 0; // Flag to indicate new data
 
 /* Function prototypes for internal parsing */
 static void GPS_ParseSentence(const char *sentence);
 
-/* GPS_Init: Initialize GPS reception.
-   For this example, we assume UART4 is used.
-   Configure UART interrupts (this is normally done in HAL_UART_MspInit).
-*/
+/* GPS_Init: Initialize GPS reception. */
 void GPS_Init(void) {
     /* Clear buffer index */
     gps_rx_index = 0;
     memset(gps_rx_buffer, 0, GPS_RX_BUFFER_SIZE);
-    /* Enable UART receive interrupt using HAL_UART_Receive_IT in your main init */
-    HAL_UART_Receive_IT(&huart4, (uint8_t *)&gps_rx_buffer[gps_rx_index], 1);
+    memset(&currentGPSFix, 0, sizeof(GPS_Fix_t));
+    new_fix_available = 0;
+
+    /* Start UART reception, 1 byte at a time using interrupt */
+    // Ensure huart4 is initialized before calling this
+    if (HAL_UART_Receive_IT(&huart4, (uint8_t *)&gps_rx_char, 1) != HAL_OK) {
+        // Handle error, maybe call Error_Handler() defined in main.c
+        Error_Handler();
+    }
 }
 
-/* GPS_GetLatestFix: Return the latest GPS fix parsed.
-   Returns 1 if a valid fix is available, 0 otherwise.
+/* GPS_GetLatestFix: Copy the latest GPS fix if available.
+   Returns 1 if a new, valid fix was copied, 0 otherwise.
 */
 uint8_t GPS_GetLatestFix(GPS_Fix_t *fix) {
-    if(currentGPSFix.fix_quality > 0) {
-        *fix = currentGPSFix;
-        return 1;
+    // Check if the fix pointer is valid
+    if (fix == NULL) {
+        return 0;
     }
-    return 0;
+
+    // Check if a new fix is available and quality is valid (>0)
+    if (new_fix_available && currentGPSFix.fix_quality > 0) {
+        // Use disable/enable interrupt or a mutex here if RTOS is used
+        // For bare-metal, temporarily disable UART IRQ if preemption is a concern
+        // HAL_NVIC_DisableIRQ(UART4_IRQn); // Requires UART4_IRQn to be defined
+
+        *fix = currentGPSFix; // Copy the latest fix data
+        new_fix_available = 0; // Clear the flag
+
+        // HAL_NVIC_EnableIRQ(UART4_IRQn);
+        return 1; // Indicate new data was copied
+    }
+    return 0; // No new valid data
 }
 
-/* This callback must be called by the UART IRQ handler when a byte is received.
-   You can call this from HAL_UART_RxCpltCallback.
+/* GPS_UART_RxCpltCallback: To be called from HAL_UART_RxCpltCallback.
+   Processes received byte, assembles sentence, calls parser, and restarts reception.
 */
 void GPS_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
-    if(huart->Instance == UART4) {
-        char received = gps_rx_buffer[gps_rx_index];
-        if(received == '\n') {
-            gps_rx_buffer[gps_rx_index] = '\0'; // Terminate the sentence
-            GPS_ParseSentence(gps_rx_buffer);
-            gps_rx_index = 0;
-            memset(gps_rx_buffer, 0, GPS_RX_BUFFER_SIZE);
+    if (huart->Instance == UART4) {
+        // Process the received character (gps_rx_char)
+        if (gps_rx_char == '\n' || gps_rx_char == '\r') { // Sentence end detected
+            if (gps_rx_index > 0) { // Check if buffer has data
+                 gps_rx_buffer[gps_rx_index] = '\0'; // Null-terminate the sentence
+                 GPS_ParseSentence(gps_rx_buffer); // Parse the complete sentence
+            }
+            gps_rx_index = 0; // Reset buffer index for the next sentence
+            // No need to memset here, index reset handles overwrite
+        } else if (gps_rx_char == '$') { // Start of a new sentence detected
+             gps_rx_index = 0; // Reset index
+             gps_rx_buffer[gps_rx_index++] = gps_rx_char; // Store '$'
         } else {
-            gps_rx_index++;
-            if(gps_rx_index >= GPS_RX_BUFFER_SIZE) {
-                gps_rx_index = 0;  // Buffer overflow, reset
+             // Append character to buffer if space available
+            if (gps_rx_index < (GPS_RX_BUFFER_SIZE - 1)) {
+                gps_rx_buffer[gps_rx_index++] = gps_rx_char;
+            } else {
+                // Buffer overflow, reset index (discarding current sentence)
+                gps_rx_index = 0;
             }
         }
-        HAL_UART_Receive_IT(&huart4, (uint8_t *)&gps_rx_buffer[gps_rx_index], 1);
+
+        // Restart UART reception for the next character
+        if (HAL_UART_Receive_IT(&huart4, (uint8_t *)&gps_rx_char, 1) != HAL_OK) {
+             // Handle UART reception restart error if necessary
+             // Maybe log an error or attempt re-initialization
+             Error_Handler(); // Example error handling
+        }
     }
 }
 
+
 /* GPS_ParseSentence: Parse a complete NMEA sentence.
-   This sample implementation only parses the RMC sentence.
-   An example RMC sentence:
-   $GPRMC,hhmmss.sss,A,llll.ll,a,yyyyy.yy,a,x.x,x.x,ddmmyy,x.x,a*hh
+   This sample implementation only parses the RMC sentence for basic fix info.
+   Example RMC: $GPRMC,123519.00,A,4807.038,N,01131.000,E,022.4,084.4,230394,,,A*6A
 */
 static void GPS_ParseSentence(const char *sentence) {
-    if(strncmp(sentence, "$GPRMC", 6) == 0) {
-        // Tokenize the sentence by comma
+    // Check for $GPRMC sentence type
+    if (strncmp(sentence, "$GPRMC", 6) == 0) {
         char copy[GPS_RX_BUFFER_SIZE];
-        strncpy(copy, sentence, GPS_RX_BUFFER_SIZE);
-        char *tokens[20] = {0};
-        uint8_t i = 0;
-        char *token = strtok(copy, ",");
-        while(token != NULL && i < 20) {
-            tokens[i++] = token;
-            token = strtok(NULL, ",");
+        strncpy(copy, sentence, GPS_RX_BUFFER_SIZE - 1);
+        copy[GPS_RX_BUFFER_SIZE - 1] = '\0'; // Ensure null termination
+
+        char *token;
+        char *saveptr; // For strtok_r if needed, but simple strtok is ok here if not nested
+        int field_index = 0;
+        GPS_Fix_t tempFix = {0}; // Temporary structure to hold parsed data
+
+        // Tokenize the sentence by comma
+        token = strtok_r(copy, ",", &saveptr); // Use strtok_r for safety if used elsewhere
+
+        while (token != NULL && field_index < 13) { // RMC has up to 13 fields
+            switch (field_index) {
+                case 2: // Field 2: Status (A=Active/Valid, V=Void)
+                    if (token[0] == 'A') {
+                        tempFix.fix_quality = 1; // Set basic fix quality if status is 'A'
+                    } else {
+                        tempFix.fix_quality = 0; // Invalid fix
+                        // No need to parse further if fix is invalid
+                        goto update_fix; // Skip remaining parsing
+                    }
+                    break;
+                case 3: // Field 3: Latitude (ddmm.mmmm)
+                    if (tempFix.fix_quality > 0) {
+                        double rawLat = atof(token);
+                        int degLat = (int)(rawLat / 100.0);
+                        double minLat = rawLat - (degLat * 100.0);
+                        tempFix.latitude = degLat + (minLat / 60.0);
+                    }
+                    break;
+                case 4: // Field 4: N/S Indicator
+                    if (tempFix.fix_quality > 0 && token[0] == 'S') {
+                        tempFix.latitude = -tempFix.latitude;
+                    }
+                    break;
+                case 5: // Field 5: Longitude (dddmm.mmmm)
+                    if (tempFix.fix_quality > 0) {
+                        double rawLon = atof(token);
+                        int degLon = (int)(rawLon / 100.0);
+                        double minLon = rawLon - (degLon * 100.0);
+                        tempFix.longitude = degLon + (minLon / 60.0);
+                    }
+                    break;
+                case 6: // Field 6: E/W Indicator
+                     if (tempFix.fix_quality > 0 && token[0] == 'W') {
+                        tempFix.longitude = -tempFix.longitude;
+                    }
+                    break;
+                // Add cases for other fields if needed (e.g., speed, course, date)
+                // Field 7: Speed over ground (knots)
+                // Field 8: Track angle (degrees true)
+                // Field 9: Date (ddmmyy)
+            }
+            field_index++;
+            token = strtok_r(NULL, ",", &saveptr);
         }
-        // Expected tokens:
-        // tokens[2]: Status (A = data valid)
-        // tokens[3]: Latitude in ddmm.mmmm
-        // tokens[4]: N/S indicator
-        // tokens[5]: Longitude in dddmm.mmmm
-        // tokens[6]: E/W indicator
-        // tokens[7]: Speed (knots, not used)
-        // tokens[8]: Course
-        // tokens[9]: Date in ddmmyy
-        if(i >= 10 && tokens[2] != NULL && tokens[2][0] == 'A') {
-            // Parse latitude
-            float rawLat = atof(tokens[3]);
-            int degLat = (int)(rawLat / 100);
-            float minLat = rawLat - (degLat * 100);
-            float latitude = degLat + (minLat / 60.0f);
-            if(tokens[4][0] == 'S')
-                latitude = -latitude;
-            // Parse longitude
-            float rawLon = atof(tokens[5]);
-            int degLon = (int)(rawLon / 100);
-            float minLon = rawLon - (degLon * 100);
-            float longitude = degLon + (minLon / 60.0f);
-            if(tokens[6][0] == 'W')
-                longitude = -longitude;
-            // For fix quality, we use token[2] ('A' means valid) and set fix_quality = 1.
-            currentGPSFix.fix_quality = 1;
-            // For number of satellites, typically it's not in RMC; use a default (e.g., 6).
-            currentGPSFix.num_sats = 6;
-            currentGPSFix.latitude = latitude;
-            currentGPSFix.longitude = longitude;
+
+update_fix:
+        // If fix was valid, update the global structure and set flag
+        // Use disable/enable interrupt or mutex here if RTOS is used
+        // HAL_NVIC_DisableIRQ(UART4_IRQn);
+        if (tempFix.fix_quality > 0) {
+             // RMC doesn't contain satellite count, parse GGA for that.
+             // We keep the previous satellite count if available or set a default.
+             // tempFix.num_sats = currentGPSFix.num_sats > 0 ? currentGPSFix.num_sats : 0; // Example
+             currentGPSFix = tempFix; // Update the global fix
+             new_fix_available = 1;   // Set the flag
         } else {
-            currentGPSFix.fix_quality = 0; // Not valid
+            // If fix is invalid, update quality but keep old lat/lon? Or clear all?
+            // Let's clear quality and flag, keeping old lat/lon might be confusing.
+             currentGPSFix.fix_quality = 0;
+             // new_fix_available = 0; // No new valid data
         }
+        // HAL_NVIC_EnableIRQ(UART4_IRQn);
+
     }
+    // Add parsing logic for other sentence types like GGA if needed
+    // Example: else if (strncmp(sentence, "$GPGGA", 6) == 0) { ... parse GGA ... }
+    // GGA sentence provides altitude and number of satellites.
 }

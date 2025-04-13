@@ -1,0 +1,17 @@
+../Core/Src/main.c:110:7:Read_Temperature_C	3
+../Core/Src/main.c:141:13:Advance_NAND_Page	4
+../Core/Src/main.c:161:15:bmi2_i2c_read	2
+../Core/Src/main.c:174:15:bmi2_i2c_write	2
+../Core/Src/main.c:187:13:bmi2_delay_us	3
+../Core/Src/main.c:210:5:main	21
+../Core/Src/main.c:433:6:SystemClock_Config	6
+../Core/Src/main.c:493:13:MX_ADC1_Init	3
+../Core/Src/main.c:550:13:MX_FLASH_Init	1
+../Core/Src/main.c:568:13:MX_I2C1_Init	4
+../Core/Src/main.c:613:13:MX_ICACHE_Init	3
+../Core/Src/main.c:642:13:MX_SPI1_Init	3
+../Core/Src/main.c:696:13:MX_UART4_Init	5
+../Core/Src/main.c:743:13:MX_USB_PCD_Init	2
+../Core/Src/main.c:776:13:MX_GPIO_Init	1
+../Core/Src/main.c:842:6:HAL_UART_RxCpltCallback	2
+../Core/Src/main.c:858:6:Error_Handler	1

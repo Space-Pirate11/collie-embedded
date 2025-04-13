@@ -45,7 +45,13 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
  ../USBX/App/ux_device_cdc_acm.h \
  ../Middlewares/ST/usbx/common/usbx_device_classes/inc/ux_device_class_cdc_acm.h \
  ../USBX/App/ux_device_descriptors.h ../USBX/Target/ux_stm32_config.h \
- ../Middlewares/ST/usbx/common/usbx_stm32_device_controllers/ux_dcd_stm32.h
+ ../Middlewares/ST/usbx/common/usbx_stm32_device_controllers/ux_dcd_stm32.h \
+ ../Core/Inc/protocol.h ../Core/Inc/bmi270.h ../Core/Inc/bmi2.h \
+ ../Core/Inc/bmi2_defs.h ../Core/Inc/gps.h ../Core/Inc/custom_types.h \
+ ../Core/Inc/bq25629.h ../Core/Inc/nand_m79a.h \
+ ../Core/Inc/nand_m79a_lld.h ../Core/Inc/nand_spi.h \
+ ../Core/Inc/wifi_ble.h ../Core/Inc/bmi2.h ../Core/Inc/bmi270.h \
+ ../Core/Inc/bmi2_defs.h
 ../Core/Inc/main.h:
 ../Drivers/STM32U3xx_HAL_Driver/Inc/stm32u3xx_hal.h:
 ../Core/Inc/stm32u3xx_hal_conf.h:
@@ -96,3 +102,17 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
 ../USBX/App/ux_device_descriptors.h:
 ../USBX/Target/ux_stm32_config.h:
 ../Middlewares/ST/usbx/common/usbx_stm32_device_controllers/ux_dcd_stm32.h:
+../Core/Inc/protocol.h:
+../Core/Inc/bmi270.h:
+../Core/Inc/bmi2.h:
+../Core/Inc/bmi2_defs.h:
+../Core/Inc/gps.h:
+../Core/Inc/custom_types.h:
+../Core/Inc/bq25629.h:
+../Core/Inc/nand_m79a.h:
+../Core/Inc/nand_m79a_lld.h:
+../Core/Inc/nand_spi.h:
+../Core/Inc/wifi_ble.h:
+../Core/Inc/bmi2.h:
+../Core/Inc/bmi270.h:
+../Core/Inc/bmi2_defs.h:

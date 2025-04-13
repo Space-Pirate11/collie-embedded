@@ -14,17 +14,12 @@
 #define INC_NAND_SPI_H_
 
 #include "stm32u3xx_hal.h"  // Updated HAL include for STM32U3xx
+#include <stdint.h>         // Include for uint types
 
-/* Definition of NAND flash SPI pins and ports */
-#define NAND_NCS_PIN    GPIO_PIN_12
-#define NAND_SCK_PIN    GPIO_PIN_13
-#define NAND_MISO_PIN   GPIO_PIN_14
-#define NAND_MOSI_PIN   GPIO_PIN_15
-
-#define NAND_MOSI_PORT  GPIOB
-#define NAND_MISO_PORT  GPIOB
-#define NAND_SCK_PORT   GPIOB
-#define NAND_NCS_PORT   GPIOB
+/* Definition of NAND flash SPI pins and ports (Ensure these match your hardware) */
+/* Example pins, adjust as necessary */
+#define NAND_NCS_PIN    GPIO_PIN_4  // Example: Using PA4 as CS
+#define NAND_NCS_PORT   GPIOA       // Example: Using GPIOA
 
 /* Dummy byte used during SPI read operations */
 #define DUMMY_BYTE         0x00
@@ -44,16 +39,21 @@ typedef struct {
 } SPI_Params;
 
 /******************************************************************************
- *                              Internal Functions
+ * Internal Functions
  *****************************************************************************/
-void __nand_spi_cs_low(void);
-void __nand_spi_cs_high(void);
+/* These are likely implemented in nand_spi.c */
+// void __nand_spi_cs_low(void);  // Make static if only used in nand_spi.c
+// void __nand_spi_cs_high(void); // Make static if only used in nand_spi.c
 
 /******************************************************************************
- *                                  List of APIs
+ * List of APIs
  *****************************************************************************/
 /* Wait function for delays (wrapper around HAL_Delay) */
 void NAND_Wait(uint8_t milliseconds);
+
+/* SPI Chip Select Control Functions (Prototypes added) */
+void NAND_SPI_Select(void);   // Added Prototype
+void NAND_SPI_Deselect(void); // Added Prototype
 
 /* SPI transaction wrappers for the NAND driver */
 NAND_SPI_ReturnType NAND_SPI_Send(SPI_HandleTypeDef *hspi, SPI_Params *data_send);

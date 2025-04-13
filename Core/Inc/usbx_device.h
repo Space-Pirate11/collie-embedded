@@ -5,10 +5,11 @@
 extern "C" {
 #endif
 
-#include "ux_api.h"
+#include "ux_api.h" // Include necessary USBX types like UINT, ULONG
 
 /* Initializes the USBX device stack in CDC mode */
-void MX_USBX_Device_Init(void);
+// Changed return type from void to UINT to match app_usbx_device.h declaration
+UINT MX_USBX_Device_Init(void);
 
 /* Must be called periodically (e.g. in main loop) to process USBX device tasks */
 void USBX_Device_Process(void);

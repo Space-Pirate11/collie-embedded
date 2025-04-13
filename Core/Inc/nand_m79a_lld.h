@@ -15,6 +15,7 @@
 #define INC_NAND_M79A_LLD_H_
 
 #include "nand_spi.h"  // Our SPI wrapper header
+#include <stdint.h>    // Include for uint types
 
 /* Functions Return Codes for NAND operations */
 typedef enum {
@@ -30,7 +31,7 @@ typedef enum {
        Ret_OperationOngoing, Ret_OperationTimeOut, */
     Ret_ReadFailed,
     Ret_ProgramFailed,
-	Ret_EraseFailed,
+    Ret_EraseFailed,
     /* Ret_SectorProtected, Ret_SectorUnprotected, Ret_SectorProtectFailed, Ret_SectorUnprotectFailed,
        Ret_SectorLocked, Ret_SectorUnlocked, Ret_SectorLockDownFailed, */
     Ret_WrongType
@@ -51,46 +52,61 @@ typedef enum {
 
     /* Device geometry based on datasheet: */
     #define FLASH_WIDTH             8               /* Data width in bits */
-    #define FLASH_SIZE_BYTES        0x10000000      /* 256 MB flash size */
+    #define FLASH_SIZE_BYTES        0x10000000      /* 256 MB flash size (2Gb -> 256MB) */
     #define NUM_BLOCKS              2048            /* Number of blocks */
     #define NUM_PAGES_PER_BLOCK     64              /* Pages per block */
-    #define PAGE_SIZE               2176            /* Total bytes per page (data+spare) */
+    #define PAGE_TOTAL_SIZE         2176            /* Total bytes per page (data+spare) */
     #define PAGE_DATA_SIZE          2048            /* Data bytes per page */
-    #define PAGE_SPARE_SIZE         128             /* Spare bytes per page */
+    #define PAGE_SPARE_SIZE         128             /* Spare bytes per page (Actual spare = 2176-2048 = 128 bytes)*/
 
-    #define BAD_BLOCK_BYTE          PAGE_DATA_SIZE
-    #define BAD_BLOCK_VALUE         0x00
+    #define BAD_BLOCK_MARKER_POS    PAGE_DATA_SIZE  /* Position of bad block marker in spare area (e.g., first byte) */
+    #define BAD_BLOCK_MARKER_VALUE  0x00            /* Value indicating a bad block */
 
-    /*
-     * Explanation:
-     * Without spare areas:
-     *   1 page = 2048 bytes; 1 block = 2048*64 = 131072 bytes; device = 131072*2048 = 268435456 bytes (256 MB)
-     * With spare areas:
-     *   1 page = 2176 bytes; 1 block = 2176*64 = 139264 bytes; device = 139264*2048 = 285212672 bytes (~272 MB)
-     */
-
-    /* Addressing definitions: Logical addresses are 32 bits covering FLASH_SIZE_BYTES */
-    typedef uint32_t NAND_Addr;
+    /* Addressing definitions: */
+    typedef uint32_t NAND_Addr; // Logical address (byte offset)
 
     /* Bit counts per address field according to datasheet page 11 */
+    // Row Address = Page Address + Block Address
+    // Block Address = 11 bits (B10..B0)
+    // Page Address = 6 bits (P5..P0)
+    // Total Row Address bits = 17 bits. Datasheet says 24 bits - ensure this matches device variant if different
     #define ROW_ADDRESS_BLOCK_BITS   11
     #define ROW_ADDRESS_PAGE_BITS    6
-    #define ROW_ADDRESS_BITS         24
+    // Column Address = 12 bits (C11..C0) - selects byte within the 2176-byte page
     #define COL_ADDRESS_BITS         12
+
     /* Structure for physical addressing within NAND flash */
     typedef struct {
-        uint16_t plane       : 1;                       // Plane number (1 bit)
-        uint16_t block       : ROW_ADDRESS_BLOCK_BITS;  // Block number (11 bits)
-        uint16_t page        : ROW_ADDRESS_PAGE_BITS;   // Page number (6 bits)
-        uint32_t rowAddr     : ROW_ADDRESS_BITS;        // Combined row address (24 bits)
-        uint32_t colAddr     : COL_ADDRESS_BITS;        // Column (offset) address within page (12 bits)
+        // Note: Using bit-fields can have implementation-defined padding/alignment.
+        // Using standard types might be safer if portability is critical.
+        uint16_t block       : ROW_ADDRESS_BLOCK_BITS;  // Block number (0-2047)
+        uint16_t page        : ROW_ADDRESS_PAGE_BITS;   // Page number within block (0-63)
+        uint16_t colAddr     : COL_ADDRESS_BITS;        // Column (offset) address within page (0-2175)
     } PhysicalAddrs;
 
-    /* Macros to extract parts of the logical address */
-    #define ADDRESS_2_BLOCK(Address)    ((uint16_t)((Address) >> 17))      // Divide by 131072 bytes per block
-    #define ADDRESS_2_PLANE(Address)    (ADDRESS_2_BLOCK(Address) & 0x1)     // The lowest bit of the block number
-    #define ADDRESS_2_PAGE(Address)     ((uint16_t)(((Address) >> 11) & 0x3F))
-    #define ADDRESS_2_COL(Address)      ((uint32_t)((Address) & 0x07FF))     // Lower 11 bits
+    /* Macros to extract parts of the logical address (if needed in nand_m79a.c) */
+    /* Block Address = 11 bits (B10..B0) -> Logical Address >> (6 + 11) = LA >> 17 ? No, >> (6+12) for byte address? Check datasheet.
+       Based on Page Size 2048 (2^11) and Pages/Block 64 (2^6): Block size = 2^17 bytes.
+       LogicalAddr / BlockSize = Block Number */
+    #define ADDRESS_2_BLOCK(Address)    ((uint16_t)((Address) / (PAGE_DATA_SIZE * NUM_PAGES_PER_BLOCK)))
+    /* Page Address = 6 bits (P5..P0) -> (LogicalAddr % BlockSize) / PageSize */
+    #define ADDRESS_2_PAGE(Address)     ((uint16_t)(((Address) % (PAGE_DATA_SIZE * NUM_PAGES_PER_BLOCK)) / PAGE_DATA_SIZE))
+    /* Column Address = 12 bits (C11..C0) -> LogicalAddr % PageSize */
+    #define ADDRESS_2_COL(Address)      ((uint16_t)((Address) % PAGE_DATA_SIZE)) // Within the data area
+
+    /* Macro to calculate the 17-bit Row Address (Block + Page) needed for commands */
+    /* Row Address = {BlockAddr[10:0], PageAddr[5:0]} */
+    #define CALC_ROW_ADDRESS(addr_struct) (((uint32_t)(addr_struct)->block << ROW_ADDRESS_PAGE_BITS) | (uint32_t)(addr_struct)->page)
+
+    /* Status Register Bit Definitions (Datasheet page 39, Register C0h) */
+    #define SPI_NAND_OIP            (1 << 0) // Bit 0: Operation In Progress (1=Busy, 0=Ready)
+    #define SPI_NAND_WEL            (1 << 1) // Bit 1: Write Enable Latch (1=Enabled, 0=Disabled)
+    #define SPI_NAND_E_FAIL         (1 << 2) // Bit 2: Erase Fail (1=Failed, 0=Passed)
+    #define SPI_NAND_P_FAIL         (1 << 3) // Bit 3: Program Fail (1=Failed, 0=Passed)
+    #define SPI_NAND_ECCS0          (1 << 4) // Bit 4: ECC Status 0
+    #define SPI_NAND_ECCS1          (1 << 5) // Bit 5: ECC Status 1
+    // Bit 6: Reserved
+    // Bit 7: Cache Read Busy (Internal use)
 
     /* Macro to check the Operation In Progress (OIP) bit in Status Register */
     #define CHECK_OIP(status_reg)       ((status_reg) & SPI_NAND_OIP)
@@ -101,52 +117,54 @@ typedef enum {
         SPI_NAND_GET_FEATURES           = 0x0F,
         SPI_NAND_SET_FEATURES           = 0x1F,
         SPI_NAND_READ_ID                = 0x9F,
-        SPI_NAND_PAGE_READ              = 0x13,
-        SPI_NAND_READ_PAGE_CACHE_RANDOM = 0x30,
-        SPI_NAND_READ_PAGE_CACHE_LAST   = 0x3F,
-        SPI_NAND_READ_CACHE_X1          = 0x03,
-        SPI_NAND_READ_CACHE_X2          = 0x3B, // dual I/O mode
-        SPI_NAND_READ_CACHE_X4          = 0x6B, // quad I/O mode
-        SPI_NAND_READ_CACHE_DUAL_IO     = 0xBB,
-        SPI_NAND_READ_CACHE_QUAD_IO     = 0xEB,
+        SPI_NAND_PAGE_READ              = 0x13, // Read page data into cache
+        SPI_NAND_READ_PAGE_CACHE_RANDOM = 0x30, // Read page data into cache (random) - Not typically used for sequential read
+        SPI_NAND_READ_PAGE_CACHE_LAST   = 0x3F, // Read page data into cache (last) - Not typically used
+        SPI_NAND_READ_CACHE_X1          = 0x03, // Read data from cache (1x I/O)
+        SPI_NAND_READ_CACHE_X2          = 0x3B, // Read data from cache (2x I/O)
+        SPI_NAND_READ_CACHE_X4          = 0x6B, // Read data from cache (4x I/O)
+        SPI_NAND_READ_CACHE_DUAL_IO     = 0xBB, // Read data from cache (Dual I/O)
+        SPI_NAND_READ_CACHE_QUAD_IO     = 0xEB, // Read data from cache (Quad I/O)
         SPI_NAND_WRITE_ENABLE           = 0x06,
         SPI_NAND_WRITE_DISABLE          = 0x04,
         SPI_NAND_BLOCK_ERASE            = 0xD8,
-        SPI_NAND_PROGRAM_EXEC           = 0x10,
-        SPI_NAND_PROGRAM_LOAD_X1        = 0x02,
-        SPI_NAND_PROGRAM_LOAD_X4        = 0x32,
-        SPI_NAND_PROGRAM_LOAD_RANDOM_X1 = 0x84,
-        SPI_NAND_PROGRAM_LOAD_RANDOM_X4 = 0x34,
-        SPI_NAND_PERMANENT_BLK_LOCK     = 0x2C
+        SPI_NAND_PROGRAM_EXEC           = 0x10, // Execute program (write cache to array)
+        SPI_NAND_PROGRAM_LOAD_X1        = 0x02, // Load program data into cache (1x I/O)
+        SPI_NAND_PROGRAM_LOAD_X4        = 0x32, // Load program data into cache (4x I/O)
+        SPI_NAND_PROGRAM_LOAD_RANDOM_X1 = 0x84, // Load random program data (1x I/O)
+        SPI_NAND_PROGRAM_LOAD_RANDOM_X4 = 0x34, // Load random program data (4x I/O)
+        // Block Lock commands not fully implemented here
+        // SPI_NAND_PERMANENT_BLK_LOCK     = 0x2C
     } CommandCodes;
 
     /* Register address definitions for Get/Set Feature commands (datasheet page 37) */
     typedef enum {
-        SPI_NAND_BLKLOCK_REG_ADDR = 0xA0,
-        SPI_NAND_CFG_REG_ADDR     = 0xB0,
-        SPI_NAND_STATUS_REG_ADDR  = 0xC0,
-        SPI_NAND_DIE_SEL_REG_ADDR = 0xD0,
+        SPI_NAND_BLKLOCK_REG_ADDR = 0xA0, // Block Lock Register
+        SPI_NAND_CFG_REG_ADDR     = 0xB0, // Configuration Register
+        SPI_NAND_STATUS_REG_ADDR  = 0xC0, // Status Register
+        SPI_NAND_DIE_SEL_REG_ADDR = 0xD0, // Die Select Register (Not applicable for single die)
     } RegisterAddr;
 
     /* Internal time constants (in ms) used in NAND commands */
     #define T_POR           2  /* Power on reset wait time: minimum 1.25 ms, rounded up */
-    #define TIME_MAX_ERS    0  /* Optional maximum erase time */
-    #define TIME_MAX_PGM    0  /* Optional maximum program time */
+    #define T_BERS          10 /* Max Block Erase time: 10ms */
+    #define T_PROG          1  /* Max Page Program time: 700us, rounded up */
+    #define T_RD            1  /* Max Page Read time: 120us, rounded up */
 
 #endif  // MT29F2G01ABAGD
 
 /******************************************************************************
- *                            Internal Functions Prototypes
+ * Internal Functions Prototypes
  *****************************************************************************/
 NAND_SPI_ReturnType __write_enable(SPI_HandleTypeDef *hspi);
 NAND_SPI_ReturnType __write_disable(SPI_HandleTypeDef *hspi);
 
 /******************************************************************************
- *                            List of APIs
+ * List of APIs
  *****************************************************************************/
 /* Status operations */
 NAND_ReturnType NAND_Reset(SPI_HandleTypeDef *hspi);
-NAND_ReturnType NAND_Wait_Until_Ready(SPI_HandleTypeDef *hspi);
+NAND_ReturnType NAND_Wait_Until_Ready(SPI_HandleTypeDef *hspi); // Timeout handled internally
 
 /* Identification operations */
 NAND_ReturnType NAND_Read_ID(SPI_HandleTypeDef *hspi, NAND_ID *nand_ID);

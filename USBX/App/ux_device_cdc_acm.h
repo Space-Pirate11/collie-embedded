@@ -55,7 +55,8 @@ VOID USBD_CDC_ACM_Deactivate(VOID *cdc_acm_instance);
 VOID USBD_CDC_ACM_ParameterChange(VOID *cdc_acm_instance);
 
 /* USER CODE BEGIN EFP */
-
+/* Declare the global pointer for the CDC ACM instance */
+extern UX_SLAVE_CLASS_CDC_ACM *cdc_acm_instance;
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
