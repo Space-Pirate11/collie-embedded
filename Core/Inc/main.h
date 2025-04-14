@@ -3,7 +3,7 @@
   ******************************************************************************
   * @file           : main.h
   * @brief          : Header for main.c file.
-  * This file contains the common defines of the application.
+  *                   This file contains the common defines of the application.
   ******************************************************************************
   * @attention
   *
@@ -53,19 +53,6 @@ extern "C" {
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
-
-/* Exported variables --------------------------------------------------------*/
-/* Declare HAL handles as extern so they can be used in other files */
-extern ADC_HandleTypeDef hadc1;
-extern I2C_HandleTypeDef hi2c1;
-extern SPI_HandleTypeDef hspi1;
-extern UART_HandleTypeDef huart4;
-extern PCD_HandleTypeDef hpcd_USB_DRD_FS;
-
-/* Global flag: When set to 1, live streaming (USB/BLE) is enabled */
-/* Define this in main.c, declare extern here */
-extern volatile uint8_t liveStreamingEnabled;
-
 
 /* USER CODE END EFP */
 

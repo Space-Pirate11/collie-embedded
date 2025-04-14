@@ -37,7 +37,8 @@ Core/Src/stm32u3xx_it.o: ../Core/Src/stm32u3xx_it.c ../Core/Inc/main.h \
  ../Drivers/STM32U3xx_HAL_Driver/Inc/stm32u3xx_hal_spi_ex.h \
  ../Drivers/STM32U3xx_HAL_Driver/Inc/stm32u3xx_hal_uart.h \
  ../Drivers/STM32U3xx_HAL_Driver/Inc/stm32u3xx_hal_uart_ex.h \
- ../Core/Inc/stm32u3xx_it.h
+ ../Core/Inc/stm32u3xx_it.h ../Core/Inc/bms_task.h \
+ ../Core/Inc/data_structures.h
 ../Core/Inc/main.h:
 ../Drivers/STM32U3xx_HAL_Driver/Inc/stm32u3xx_hal.h:
 ../Core/Inc/stm32u3xx_hal_conf.h:
@@ -78,3 +79,5 @@ Core/Src/stm32u3xx_it.o: ../Core/Src/stm32u3xx_it.c ../Core/Inc/main.h \
 ../Drivers/STM32U3xx_HAL_Driver/Inc/stm32u3xx_hal_uart.h:
 ../Drivers/STM32U3xx_HAL_Driver/Inc/stm32u3xx_hal_uart_ex.h:
 ../Core/Inc/stm32u3xx_it.h:
+../Core/Inc/bms_task.h:
+../Core/Inc/data_structures.h:

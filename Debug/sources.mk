@@ -24,6 +24,8 @@ C_DEPS :=
 SUBDIRS := \
 Core/Src \
 Core/Startup \
+Drivers/BMI270 \
+Drivers/NAND_M79A \
 Drivers/STM32U3xx_HAL_Driver/Src \
 Middlewares/ST/usbx/common/core/src \
 Middlewares/ST/usbx/common/usbx_device_classes/src \

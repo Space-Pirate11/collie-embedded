@@ -14,6 +14,8 @@ RM := rm -rf
 -include Middlewares/ST/usbx/common/usbx_device_classes/src/subdir.mk
 -include Middlewares/ST/usbx/common/core/src/subdir.mk
 -include Drivers/STM32U3xx_HAL_Driver/Src/subdir.mk
+-include Drivers/NAND_M79A/subdir.mk
+-include Drivers/BMI270/subdir.mk
 -include Core/Startup/subdir.mk
 -include Core/Src/subdir.mk
 -include objects.mk

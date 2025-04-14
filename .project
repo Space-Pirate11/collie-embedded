@@ -31,4 +31,16 @@
 		<nature>org.eclipse.cdt.managedbuilder.core.managedBuildNature</nature>
 		<nature>org.eclipse.cdt.managedbuilder.core.ScannerConfigNature</nature>
 	</natures>
+	<linkedResources>
+		<link>
+			<name>Drivers/BMI270</name>
+			<type>2</type>
+			<location>/Users/amoltandon/STM32CubeIDE/workspace_1.18.0/Collie_V0/Drivers/BMI270</location>
+		</link>
+		<link>
+			<name>Drivers/NAND_M79A</name>
+			<type>2</type>
+			<location>/Users/amoltandon/STM32CubeIDE/workspace_1.18.0/Collie_V0/Drivers/NAND_M79A</location>
+		</link>
+	</linkedResources>
 </projectDescription>
