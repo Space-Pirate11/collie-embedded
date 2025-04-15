@@ -28,6 +28,26 @@ extern UX_SLAVE_CLASS_CDC_ACM *cdc_acm_instance;
 static volatile bool usb_device_ready = false; // Flag updated by is_ready check
 static uint32_t last_send_warning_time = 0; // Used for rate-limiting error messages
 
+// --- Helper Function --- // <<< ADD THIS FUNCTION >>>
+
+/**
+ * @brief Converts BMS charge state enum to a descriptive string.
+ * @param state The bms_charge_state_t enum value.
+ * @return Pointer to a constant string representation.
+ */
+static const char* get_bms_charge_state_string(bms_charge_state_t state) {
+    switch (state) {
+        case BMS_CHG_NOT_CHARGING: return "NOT_CHG";
+        case BMS_CHG_PRECHARGE:    return "PRECHG";
+        case BMS_CHG_FASTCHARGE:   return "FAST";
+        case BMS_CHG_TAPER:        return "TAPER";
+        case BMS_CHG_TOP_OFF:      return "TOP_OFF";
+        case BMS_CHG_CHARGE_DONE:  return "DONE";
+        case BMS_CHG_UNKNOWN:
+        default:                   return "UNKNOWN";
+    }
+}
+
 // --- Function Definitions ---
 
 /**
@@ -177,32 +197,37 @@ bool usb_cdc_task_send_sensor_data(const imu_data_t *p_imu,
                                    const temp_data_t *p_temp,
                                    const bms_status_t *p_bms)
 {
-    // Use a static buffer to avoid large stack allocation if called frequently
     static char temp_buffer[USB_CDC_SEND_BUFFER_SIZE];
     int len = 0;
+    const char *bms_status_str = "INVALID"; // Default string if data invalid // <<< ADD THIS VARIABLE >>>
 
-    // Check readiness and valid pointers first
-     if (!usb_cdc_task_is_ready() || cdc_acm_instance == NULL || p_imu == NULL || p_gps == NULL || p_temp == NULL || p_bms == NULL) {
-        // Don't spam warnings here, send_string handles readiness checks/warnings
+    if (!usb_cdc_task_is_ready() || cdc_acm_instance == NULL || p_imu == NULL || p_gps == NULL || p_temp == NULL || p_bms == NULL) {
         return false;
+    }
+
+    // <<< ADD THIS LOGIC >>>
+    // Get the BMS status string if data is valid
+    if (p_bms->data_valid) {
+        bms_status_str = get_bms_charge_state_string(p_bms->charge_status);
     }
 
     // Format data into a string (Example CSV format)
     // Includes checks for data validity flags within each structure
+    // <<< MODIFY THIS snprintf CALL >>>
     len = snprintf(temp_buffer, sizeof(temp_buffer),
-                   "T:%.2f,A:%d,%d,%d,G:%d,%d,%d,GPS:%d,%.4f,%.4f,Fix:%d,Sat:%d,BMS:%d,%.0f,%.0f,%d\r\n",
-                   p_temp->data_valid ? p_temp->temperature_c : -999.99f, // Use placeholder for invalid temp
+                   "T:%.2f,A:%d,%d,%d,G:%d,%d,%d,GPS:%d,%.4f,%.4f,Fix:%d,Sat:%d,BMS:%d,%.0f,%.0f,%s\r\n", // <<< Changed %d to %s for BMS status
+                   p_temp->data_valid ? p_temp->temperature_c : -999.99f,
                    p_imu->accel_x, p_imu->accel_y, p_imu->accel_z,
                    p_imu->gyro_x, p_imu->gyro_y, p_imu->gyro_z,
-                   p_gps->data_valid, // Send validity flag
-                   p_gps->data_valid ? p_gps->latitude : 0.0f,  // Send 0 if invalid
-                   p_gps->data_valid ? p_gps->longitude : 0.0f, // Send 0 if invalid
+                   p_gps->data_valid,
+                   p_gps->data_valid ? p_gps->latitude : 0.0f,
+                   p_gps->data_valid ? p_gps->longitude : 0.0f,
                    p_gps->data_valid ? p_gps->fix_quality : 0,
                    p_gps->data_valid ? p_gps->satellites_tracked : 0,
-                   p_bms->data_valid, // Send validity flag
-                   p_bms->data_valid ? p_bms->battery_voltage_mv : -1.0f, // Use placeholder for invalid BMS values
+                   p_bms->data_valid,
+                   p_bms->data_valid ? p_bms->battery_voltage_mv : -1.0f,
                    p_bms->data_valid ? p_bms->charge_current_ma : -1.0f,
-                   p_bms->data_valid ? p_bms->charge_status : -1 // Use placeholder for invalid status
+                   bms_status_str // <<< Pass the string pointer instead of the integer
                   );
 
     // Check for snprintf errors (negative return value) or buffer overflow
@@ -212,11 +237,8 @@ bool usb_cdc_task_send_sensor_data(const imu_data_t *p_imu,
     }
     if (len >= sizeof(temp_buffer)) {
          printf("USB CDC Error: snprintf buffer overflow during data formatting. Increase USB_CDC_SEND_BUFFER_SIZE.\r\n");
-        // Send truncated data? Or return error? Returning error is safer.
         return false;
-        // Or: temp_buffer[sizeof(temp_buffer) - 1] = '\0'; // Null-terminate truncated string
     }
-
 
     // Send the formatted string using the standalone-compatible function
     return usb_cdc_task_send_string(temp_buffer);

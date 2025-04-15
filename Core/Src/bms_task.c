@@ -316,18 +316,31 @@ bool bms_task_init(void) {
     if (!success) { printf("BMS Error: Failed to set termination current\r\n"); goto init_fail; }
      printf("BMS Cfg: Termination Current set to 100mA\r\n");
 
-    // Minimum System Voltage: 3.52V (Default)
-    // Reg Addr: 0x0E/0x0F, Bits 11:6, Step: 80mV, Base: 2560mV
-    // Code = (3520-2560)/80 = 12 = 0x0C. Shifted left by 6 -> 0x300 -> Reg Value 0x0B00
-    data_word = 0x0B00;
+     // Minimum System Voltage: Target 3.3V -> Calculated 3.28V
+     // Reg Addr: 0x0E/0x0F, Bits 11:6, Step: 80mV, Base: 2560mV
+     // Code = (3280-2560)/80 = 9 = 0x09. Shifted left by 6 -> Reg Value 0x0240
+    data_word = 0x0240;
     success &= bms_task_write_register_word(BQ_REG_MINIMAL_SYSTEM_VOLTAGE, data_word);
      if (!success) { printf("BMS Error: Failed to set min sys voltage\r\n"); goto init_fail; }
-     printf("BMS Cfg: Min System Voltage set to 3520mV\r\n");
+     printf("BMS Cfg: Min System Voltage set to 3280mV\r\n");
 
-    // Input Current Limit: Default = 3.2A (A0h), BQ25628 default uses ILIM pin (REG0x19[2]=1)
-    // Keep default behavior (use ILIM pin) unless specific I2C limit is required.
-    // If setting via I2C: Clear REG0x19[2], then write to REG0x06/07.
-    printf("BMS Cfg: Input Current Limit controlled by ILIM pin (default)\r\n");
+     // Input Current Limit: Set via I2C to 2000mA
+     // First, disable external ILIM pin control (BQ25628 specific)
+     success &= bms_task_read_register_byte(BQ_REG_CHARGER_CONTROL_3, &data_byte);
+     if (success) {
+    	 data_byte &= ~(1 << 2); // Clear EN_EXTILIM bit (bit 2)
+    	 success &= bms_task_write_register_byte(BQ_REG_CHARGER_CONTROL_3, data_byte);
+    	 if (!success) { printf("BMS Error: Failed to write EN_EXTILIM=0\r\n"); goto init_fail; }
+     } else {
+    	 printf("BMS Error: Failed read before setting EN_EXTILIM\r\n"); goto init_fail;
+     }
+     // Now set IINDPM via I2C register
+     // Reg Addr: 0x06/0x07, Bits 11:4, Step: 20mA, Base: 100mA
+     // Code = (2000-100)/20 = 95 = 0x5F. Shifted left by 4 -> Reg Value 0x05F0
+     data_word = 0x05F0;
+     success &= bms_task_write_register_word(BQ_REG_INPUT_CURRENT_LIMIT, data_word);
+     if (!success) { printf("BMS Error: Failed to set input current limit\r\n"); goto init_fail; }
+     printf("BMS Cfg: Input Current Limit set via I2C to 2000mA\r\n"); // Updated printf
 
     // Configure Timers & Watchdog: Use defaults
     // REG0x15: EN_SAFETY_TMRS=1, TMR2X_EN=1, PRECHG_TMR=0(2.5h), CHG_TMR=0(14.5h) -> 0x5C (default)
